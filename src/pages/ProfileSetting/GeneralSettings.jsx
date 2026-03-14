@@ -1,0 +1,479 @@
+import React, { useState, useEffect } from "react";
+import { FiEdit3, FiCalendar } from "react-icons/fi";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import axios from "axios";
+import { toast } from "react-toastify";
+import Avatar from "../../components/Avatar";
+
+const GeneralSettings = () => {
+  const [formData, setFormData] = useState({
+    username: "",
+    email: "",
+    mobile: "",
+    birthdate: "",
+    gender: "",
+    country: "",
+  });
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [countries, setCountries] = useState([]);
+  const [countryIdToName, setCountryIdToName] = useState({});
+  const [nameToCountryId, setNameToCountryId] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [userData, setUserData] = useState(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [updateLoading, setUpdateLoading] = useState(false);
+
+  // Get user ID from localStorage
+  const userId = localStorage.getItem('user_id') 
+
+  // Fetch user data from API
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        setUserLoading(true);
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/v1/profile/user-data?user_profile_id=${userId}&fetch=user_data`,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`,
+            }
+          }
+        );
+
+        const data = response.data;
+        
+        if (data.api_status === '200') {
+          setUserData(data.user_data);
+          
+          // Handle birthday - convert from YYYY-MM-DD to DD/MM/YYYY for display
+          let birthdate = "";
+          let selectedDateValue = null;
+          if (data.user_data.birthday && data.user_data.birthday !== "0000-00-00") {
+            const birthDate = new Date(data.user_data.birthday);
+            if (!isNaN(birthDate.getTime())) {
+              selectedDateValue = birthDate;
+              birthdate = birthDate.toLocaleDateString("en-GB"); // DD/MM/YYYY format
+            }
+          }
+          
+          // Handle country_id - only set if it's a valid number > 0
+          const countryId = parseInt(data.user_data.country_id) || 0;
+          const countryValue = countryId > 0 ? countryId.toString() : "";
+          
+          // Populate form with user data
+          setFormData({
+            username: data.user_data.username || "",
+            email: data.user_data.email || "",
+            mobile: data.user_data.phone_number || "",
+            birthdate: birthdate,
+            gender: data.user_data.gender || "",
+            country: countryValue,
+          });
+          
+          setSelectedDate(selectedDateValue);
+        } else {
+          throw new Error(data.api_text || 'Failed to fetch user data');
+        }
+      } catch (err) {
+        console.error('Error fetching user data:', err);
+        toast.error('Failed to load user data. Please try again.');
+      } finally {
+        setUserLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, [userId]);
+
+  // Fetch countries from API
+  useEffect(() => {
+    const fetchCountries = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('https://restcountries.com/v3.1/all?fields=name');
+        if (!response.ok) {
+          throw new Error('Failed to fetch countries');
+        }
+        const data = await response.json();
+        // Sort countries alphabetically by name
+        const sortedCountries = data
+          .map(country => country.name.common)
+          .sort((a, b) => a.localeCompare(b));
+        
+        // Create mapping objects for country ID to name and name to ID
+        const idToName = {};
+        const nameToId = {};
+        
+        sortedCountries.forEach((countryName, index) => {
+          const countryId = index + 1; // Start from 1
+          idToName[countryId] = countryName;
+          nameToId[countryName] = countryId;
+        });
+        
+        setCountries(sortedCountries);
+        setCountryIdToName(idToName);
+        setNameToCountryId(nameToId);
+      } catch (err) {
+        toast.error('Failed to load countries. Please try again.');
+        console.error('Error fetching countries:', err);
+        // Fallback to a basic list if API fails
+        const fallbackCountries = ['India', 'United States', 'United Kingdom', 'Canada', 'Australia'];
+        const idToName = {};
+        const nameToId = {};
+        
+        fallbackCountries.forEach((countryName, index) => {
+          const countryId = index + 1;
+          idToName[countryId] = countryName;
+          nameToId[countryName] = countryId;
+        });
+        
+        setCountries(fallbackCountries);
+        setCountryIdToName(idToName);
+        setNameToCountryId(nameToId);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCountries();
+  }, []);
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    setUpdateLoading(true);
+    
+    try {
+      // Prepare user data for API - only include changed fields
+      const userDataToUpdate = {};
+      
+      // Compare current form data with original user data to find changes
+      if (formData.username !== (userData?.username || '')) {
+        userDataToUpdate.username = formData.username;
+      }
+      if (formData.email !== (userData?.email || '')) {
+        userDataToUpdate.email = formData.email;
+      }
+      if (formData.mobile !== (userData?.phone_number || '')) {
+        userDataToUpdate.phone_number = formData.mobile;
+      }
+      
+      // Handle birthday - convert from DD/MM/YYYY to YYYY-MM-DD format for API
+      if (formData.birthdate && selectedDate) {
+        const year = selectedDate.getFullYear();
+        const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(selectedDate.getDate()).padStart(2, '0');
+        const formattedBirthday = `${year}-${month}-${day}`;
+        const currentBirthday = userData?.birthday || "";
+        if (formattedBirthday !== currentBirthday && currentBirthday !== "0000-00-00") {
+          userDataToUpdate.birthday = formattedBirthday;
+        } else if (currentBirthday === "0000-00-00" || !currentBirthday) {
+          userDataToUpdate.birthday = formattedBirthday;
+        }
+      }
+      
+      if (formData.gender !== (userData?.gender || '')) {
+        userDataToUpdate.gender = formData.gender;
+      }
+      // Convert both values to numbers for proper comparison
+      const currentCountryId = parseInt(userData?.country_id) || 0;
+      const formCountryId = parseInt(formData.country) || 0;
+      
+      if (formCountryId !== currentCountryId && formCountryId > 0) {
+        userDataToUpdate.country_id = formCountryId;
+      }
+
+      // Only send request if there are changes
+      if (Object.keys(userDataToUpdate).length === 0) {
+        return;
+      }
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/v1/settings/update-user-data`,
+        {
+          type: "general_settings",
+          user_data: JSON.stringify(userDataToUpdate)
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`,
+          }
+        }
+      );
+
+      const data = response.data;
+      
+      if (data.api_status === '200') {
+        // Fetch updated user data from API
+        try {
+          const refreshResponse = await axios.get(
+            `${import.meta.env.VITE_API_URL}/api/v1/profile/user-data?user_profile_id=${userId}&fetch=user_data`,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token') || ''}`,
+              }
+            }
+          );
+          
+          if (refreshResponse.data.api_status === '200') {
+            const refreshedData = refreshResponse.data.user_data;
+            setUserData(refreshedData);
+            
+            // Update form with refreshed data
+            let birthdate = "";
+            let selectedDateValue = null;
+            if (refreshedData.birthday && refreshedData.birthday !== "0000-00-00") {
+              const birthDate = new Date(refreshedData.birthday);
+              if (!isNaN(birthDate.getTime())) {
+                selectedDateValue = birthDate;
+                birthdate = birthDate.toLocaleDateString("en-GB");
+              }
+            }
+            
+            const countryId = parseInt(refreshedData.country_id) || 0;
+            const countryValue = countryId > 0 ? countryId.toString() : "";
+            
+            setFormData({
+              username: refreshedData.username || "",
+              email: refreshedData.email || "",
+              mobile: refreshedData.phone_number || "",
+              birthdate: birthdate,
+              gender: refreshedData.gender || "",
+              country: countryValue,
+            });
+            
+            setSelectedDate(selectedDateValue);
+          }
+        } catch (refreshErr) {
+          console.error('Error refreshing user data:', refreshErr);
+        }
+        
+        toast.success("General settings updated successfully!");
+      } else {
+        throw new Error(data.api_text || 'Failed to update general settings');
+      }
+      
+    } catch (err) {
+      console.error('Error updating general settings:', err);
+      const errorMessage = err.response?.data?.api_text || 'Failed to update general settings. Please try again.';
+      toast.error(errorMessage);
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    if (date) {
+      const formattedDate = date.toLocaleDateString("en-GB"); // DD/MM/YYYY format
+      setFormData({ ...formData, birthdate: formattedDate });
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl p-6 border border-[#d3d1d1]">
+      <h2 className="text-xl font-semibold text-white text-center border-b border-white/20 pb-2 mb-6 bg-gradient-to-l from-[rgba(96,161,249,1)] to-[rgba(17,83,231,1)] -m-6 px-6 py-4 rounded-t-xl">
+        General Setting
+      </h2>
+
+      {/* Profile Section */}
+      <div className="flex items-center gap-4 mb-6 pb-4 border-b border-[#d3d1d1]">
+        <Avatar
+          src={userData?.avatar_url}
+          name={`${userData?.first_name || ''} ${userData?.last_name || ''}`.trim() || 'User Name'}
+          email={userData?.email}
+          alt="profile photo"
+          size="lg"
+          className="w-16 h-16"
+        />
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-800">
+            {userLoading ? 'Loading...' : `${userData?.first_name || ''} ${userData?.last_name || ''}`.trim() || 'User Name'}
+          </h3>
+          <p className="text-gray-600">
+            @{userLoading ? 'loading...' : userData?.username || 'username'}
+          </p>
+        </div>
+        
+      </div>
+
+      {userLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading user data...</p>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Username or Email id : <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="username"
+                value={formData.username}
+                placeholder="Username or Email id"
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email :
+              </label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                placeholder="Enter your Email"
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Mobile No. :
+              </label>
+              <input
+                type="tel"
+                name="mobile"
+                value={formData.mobile}
+                placeholder="Enter Mobile No."
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-200 rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Birthdate :
+              </label>
+              <div className="relative w-full border border-gray-200 rounded-full bg-white focus-within:ring-2 focus-within:ring-blue-500">
+                <DatePicker
+                  selected={selectedDate && !isNaN(selectedDate.getTime()) ? selectedDate : null}
+                  onChange={handleDateChange}
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="Select your Birthdate (must be 14+ years old)"
+                  maxDate={(() => {
+                    const date = new Date();
+                    date.setFullYear(date.getFullYear() - 14);
+                    return date;
+                  })()}
+                  minDate={(() => {
+                    const date = new Date();
+                    date.setFullYear(date.getFullYear() - 120);
+                    return date;
+                  })()}
+                  showYearDropdown
+                  showMonthDropdown
+                  dropdownMode="select"
+                  yearDropdownItemNumber={100}
+                  scrollableYearDropdown
+                  className="w-full px-3 py-2 pr-10 border-0 focus:outline-none cursor-pointer rounded-lg"
+                  wrapperClassName="w-full"
+                  calendarClassName="shadow-lg"
+                />
+                <FiCalendar 
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 size-5 cursor-pointer" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const datePickerInput = e.currentTarget.previousElementSibling?.querySelector('input');
+                    if (datePickerInput) {
+                      datePickerInput.focus();
+                      datePickerInput.click();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Gender :
+              </label>
+              <select
+                name="gender"
+                value={formData.gender}
+                onChange={handleChange}
+                className={`w-full px-3 py-2 border border-gray-200 rounded-full bg-white ${
+                  formData.gender === "" ? "text-gray-400" : "text-black"
+                }`}
+              >
+                <option value="" disabled>
+                  Select Gender
+                </option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-black mb-2">
+                Country :
+              </label>
+              <select
+                name="country"
+                value={formData.country}
+                onChange={handleChange}
+                disabled={loading}
+                className={`w-full px-3 py-2 border border-gray-200 rounded-full bg-white ${
+                  loading ? 'bg-gray-100 cursor-not-allowed' : ''
+                } ${formData.country === "" ? "text-black" : "text-black"}`}
+              >
+                <option value="" disabled>
+                  {loading ? 'Loading countries...' : 'Select your Country'}
+                </option>
+                {countries.map((country, index) => (
+                  <option key={index} value={nameToCountryId[country]}>
+                    {country}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="border-t border-[#d3d1d1] pt-4 mt-3.5 grid place-items-center">
+            <button
+              type="submit"
+              disabled={updateLoading}
+              className={`px-8 py-3 bg-gradient-to-r from-[#60a1f9] to-[#1153e7] text-white rounded-full font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-[#1153e7] focus:ring-offset-2 text-base shadow-md flex items-center gap-2 ${
+                updateLoading ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg hover:scale-105 cursor-pointer'
+              }`}
+            >
+              {updateLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span>Save Changes</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+};
+
+export default GeneralSettings;

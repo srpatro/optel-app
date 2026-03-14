@@ -1,0 +1,744 @@
+import React, { useEffect, useState, useRef } from 'react'
+import { FaPlus, FaUser, FaUserFriends, FaUsers } from 'react-icons/fa'
+import { CiCircleMore } from 'react-icons/ci'
+import { BiBell } from 'react-icons/bi'
+import { FaTimes } from 'react-icons/fa'
+import { HiUsers } from "react-icons/hi";
+import { useNavigate, Link } from 'react-router-dom';
+import { useChatContext } from '../../context/ChatContext';
+import { useUser } from '../../context/UserContext';
+import StoryCreateModal from './StoryCreateModal';
+import StoryViewer from './StoryViewer';
+import Notifications from './Notifications';
+import GlobalSearch from './GlobalSearch';
+import FriendRequests from './FriendRequests';
+import TrendingTopics from './TrendingTopics';
+
+
+
+const Chatbox = ({ onClose, isMobile = false, showTrending = true }) => {
+  const { userData, storyUpdateTrigger } = useUser();
+
+  const [conversations, setConversations] = useState([]);
+  const [groupConversations, setGroupConversations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState('individual'); // 'individual' or 'groups'
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [friendRequestsOpen, setFriendRequestsOpen] = useState(false);
+  const [friendRequestsCount, setFriendRequestsCount] = useState(0);
+  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const [storyModalOpen, setStoryModalOpen] = useState(false);
+  const [storyViewerOpen, setStoryViewerOpen] = useState(false);
+  const [userStories, setUserStories] = useState([]);
+  const [allUserStories, setAllUserStories] = useState([]); // Store all users' stories
+  const [storiesLoading, setStoriesLoading] = useState(false);
+  const [storyBorderAnimating, setStoryBorderAnimating] = useState(false);
+  const containerRef = useRef(null);
+  const [containerRect, setContainerRect] = useState(null);
+  const navigate = useNavigate();
+  const { setCurrentChat } = useChatContext();
+
+  // Handle logout
+  const handleLogout = () => {
+    // Clear all localStorage items
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('session_id');
+    localStorage.removeItem('isVerified');
+    localStorage.removeItem('membership');
+    localStorage.removeItem('signup_user_data');
+
+    // Close the popup
+    setMoreOptionsOpen(false);
+
+    // Navigate to login page
+    navigate('/login');
+  };
+
+  // Functions to handle popup toggles
+  const toggleSearch = () => {
+    setSearchOpen(!searchOpen);
+    setNotificationsOpen(false);
+    setFriendRequestsOpen(false);
+    setMoreOptionsOpen(false);
+  };
+
+  const toggleNotifications = () => {
+    setNotificationsOpen(!notificationsOpen);
+    setSearchOpen(false);
+    setFriendRequestsOpen(false);
+    setMoreOptionsOpen(false);
+  };
+
+  const toggleFriendRequests = () => {
+    setFriendRequestsOpen(!friendRequestsOpen);
+    setSearchOpen(false);
+    setNotificationsOpen(false);
+    setMoreOptionsOpen(false);
+  };
+
+  const toggleMoreOptions = () => {
+    setMoreOptionsOpen(!moreOptionsOpen);
+    setSearchOpen(false);
+    setNotificationsOpen(false);
+    setFriendRequestsOpen(false);
+  };
+
+  const closeAllPopups = () => {
+    setSearchOpen(false);
+    setNotificationsOpen(false);
+    setFriendRequestsOpen(false);
+    setMoreOptionsOpen(false);
+  };
+
+  // Sample data for testing when API fails
+  const sampleGroups = [
+    {
+      id: 1,
+      group_id: 'group1',
+      name: 'Tech Enthusiasts',
+      avatar: '/icons/group.png',
+      message: 'Latest tech updates!',
+      time: '2 min ago',
+      isOnline: true
+    },
+    {
+      id: 2,
+      group_id: 'group2',
+      name: 'Design Community',
+      avatar: '/icons/group.png',
+      message: 'New design trends',
+      time: '5 min ago',
+      isOnline: true
+    }
+  ];
+
+  const sampleConversations = [
+    {
+      id: 1,
+      user_id: 'user1',
+      name: 'John Doe',
+      avatar: '/perimg.png',
+      message: 'Hey, how are you?',
+      time: '2 min ago',
+      isOnline: true
+    },
+    {
+      id: 2,
+      user_id: 'user2',
+      name: 'Jane Smith',
+      avatar: '/perimg.png',
+      message: 'Great to see you!',
+      time: '5 min ago',
+      isOnline: false
+    }
+  ];
+
+ 
+
+
+  // Re-fetch stories when storyUpdateTrigger changes (story created/deleted)
+  useEffect(() => {
+    if (storyUpdateTrigger > 0) {
+      fetchUserStories();
+    }
+  }, [storyUpdateTrigger]);
+
+  // Fetch stories on component mount
+  useEffect(() => {
+    fetchUserStories();
+    fetchNotificationCount();
+    fetchFriendRequestsCount();
+  }, []);
+
+  const fetchNotificationCount = async () => {
+    try {
+      const accessToken = localStorage.getItem("access_token");
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/notifications/get`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'X-Requested-With': 'XMLHttpRequest',
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          seen: 0 // Fetch all notifications
+        }),
+      });
+
+      const data = await response.json();
+      if (data?.api_status === 200) {
+        // Use count_notifications from API response, or count unseen notifications
+        const unseenCount = data.count_notifications || data.notifications?.filter(n => n.seen === 0).length || 0;
+        setUnreadNotificationsCount(unseenCount);
+      }
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
+    }
+  };
+
+  const fetchFriendRequestsCount = async () => {
+    try {
+      const accessToken = localStorage.getItem("access_token");
+      const response = await fetch('https://admin.ouptel.in/api/v1/friends/requests?per_page=1', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      if (data?.ok) {
+        setFriendRequestsCount(data.meta?.total || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching friend requests count:', error);
+    }
+  };
+
+  // Fetch user stories
+  const fetchUserStories = async () => {
+    setStoriesLoading(true);
+    try {
+      const accessToken = localStorage.getItem('access_token');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/stories/user-stories`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          limit: 20,
+          offset: 0
+        }),
+      });
+
+      const data = await response.json();
+      if (data?.api_status === 200 && data?.stories && data.stories.length > 0) {
+        // Store all users' stories for multi-user navigation
+        setAllUserStories(data.stories);
+        
+        // Find current user's stories
+        const userId = localStorage.getItem('user_id');
+        const currentUserStories = data.stories.find(
+          (storyGroup) => storyGroup.user_id.toString() === userId.toString()
+        );
+        if (currentUserStories && currentUserStories.stories && currentUserStories.stories.length > 0) {
+          setUserStories(currentUserStories.stories);
+        } else {
+          setUserStories([]);
+        }
+      } else {
+        setAllUserStories([]);
+        setUserStories([]);
+      }
+    } catch (error) {
+      console.error('Error fetching stories:', error);
+      setAllUserStories([]);
+      setUserStories([]);
+    } finally {
+      setStoriesLoading(false);
+    }
+  };
+
+  // Handle profile image click - show stories if exist, otherwise show create modal
+  const handleProfileImageClick = () => {
+    if (userStories && userStories.length > 0) {
+      // Trigger animation on click
+      setStoryBorderAnimating(true);
+      setTimeout(() => {
+        setStoryBorderAnimating(false);
+      }, 600); // Animation duration
+      setStoryViewerOpen(true);
+    } else {
+      setStoryModalOpen(true);
+    }
+  };
+
+  useEffect(() => {
+  }, [activeSection]);
+
+  // Track container bounds for notification overlay alignment
+  useEffect(() => {
+    const updateContainerRect = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerRect({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+        });
+      }
+    };
+
+    if (notificationsOpen) {
+      updateContainerRect();
+      window.addEventListener('resize', updateContainerRect);
+      window.addEventListener('scroll', updateContainerRect, true);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateContainerRect);
+      window.removeEventListener('scroll', updateContainerRect, true);
+    };
+  }, [notificationsOpen]);
+
+  // Close popups when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.profile-section')) {
+        closeAllPopups();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+
+
+  return (
+    <div ref={containerRef} className={`relative bg-[#EDF6F9] px-1 py-8 h-full overflow-y-auto scrollbar-hide smooth-scroll pt-0  ${isMobile ? 'w-full' : 'w-full'
+      }`}>
+      {/* Mobile Close Button */}
+      {isMobile && (
+        <div className="flex justify-between items-center mb-4 lg:hidden pt-4">
+          <h2 className="text-xl font-semibold text-gray-800">Messages & Activity</h2>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            title="Close"
+          >
+            <FaTimes className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
+      {/* Profile Section */}
+      <div className="pt-8 sticky top-0 z-10 bg-[#EDF6F9] ">
+        <div className={`w-full xl:p-1 lg:p-1 rounded-lg bg-white shadow-[#EDF6F9] shadow-md border border-[#d3d1d1] sticky top-5 z-10 profile-section  ${notificationsOpen ? 'min-h-[70vh]' : ''}`}>
+          <div className="flex xl:p-1 lg:p-1 items-center justify-between">
+            <div className="relative">
+              {/* Story indicator border - Instagram style gradient ring */}
+              {userStories && userStories.length > 0 && (
+                <div
+                  className="absolute inset-[-5px] rounded-full z-0 p-[3px]"
+                  style={{
+                    background: 'linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)',
+                  }}
+                >
+                  <div className="w-full h-full rounded-full bg-white p-[2px]">
+                    <div className="w-full h-full rounded-full bg-[#EDF6F9]" />
+                  </div>
+                </div>
+              )}
+              <div
+                className="relative w-[58px] h-[58px] rounded-full bg-white p-[2px] shadow-lg cursor-pointer hover:opacity-90 transition-opacity z-10"
+                onClick={handleProfileImageClick}
+                title={userStories?.length > 0 ? 'View your stories' : 'Create story'}
+              >
+                <div className="w-full h-full rounded-full overflow-hidden bg-[#EDF6F9]">
+                  {userData?.avatar_url ? (
+                    <img
+                      src={userData.avatar_url || "https://img.freepik.com/premium-vector/man-avatar-profile-picture-isolated-background-avatar-profile-picture-man_1293239-4866.jpg?semt=ais_hybrid&w=740&q=80"}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.src = "https://img.freepik.com/premium-vector/man-avatar-profile-picture-isolated-background-avatar-profile-picture-man_1293239-4866.jpg?semt=ais_hybrid&w=740&q=80";
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+                      <FaUser className="text-gray-600 text-xl" />
+                    </div>
+                  )}
+                </div>
+                <div
+                  className="grid place-items-center absolute left-1/2 -translate-x-1/2 -bottom-0.5 bg-blue-600 w-6 h-6 rounded-full border-[2px] border-white cursor-pointer hover:bg-blue-700 transition-colors z-20 shadow-md"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setStoryModalOpen(true);
+                  }}
+                  title="Add story"
+                >
+                  <FaPlus className='text-white size-[12px]' />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center xl:gap-4 lg:gap-2 relative">
+              {/* Search Icon and Input - Inline */}
+              <div className="relative flex items-center search-container">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className={`text-gray-500 size-[25px] cursor-pointer transition-colors hover:text-blue-500 ${searchOpen ? 'text-blue-500' : ''}`}
+                  width={24}
+                  height={24}
+                  viewBox="0 0 24 24"
+                  onClick={toggleSearch}
+                  title="Search"
+                >
+                  <g fill="none" stroke="currentColor" strokeWidth={2}>
+                    <circle cx={11} cy={11} r="7"></circle>
+                    <path strokeLinecap="round" d="M11 8a3 3 0 0 0-3 3m12 9l-3-3"></path>
+                  </g>
+                </svg>
+              </div>
+
+              {/* Bell Icon and Notifications */}
+              <div className="relative">
+                <BiBell
+                  className={`text-gray-500 size-[25px] cursor-pointer transition-colors hover:text-blue-500 ${notificationsOpen ? 'text-blue-500' : ''}`}
+                  onClick={toggleNotifications}
+                  title="Notifications"
+                />
+                {unreadNotificationsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white shadow-sm">
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </span>
+                )}
+              </div>
+
+              {/* Friend Requests Icon */}
+              <div className="relative">
+                <FaUserFriends
+                  className={`text-gray-500 size-[25px] cursor-pointer transition-colors hover:text-blue-500 ${friendRequestsOpen ? 'text-blue-500' : ''}`}
+                  onClick={toggleFriendRequests}
+                  title="Friend requests"
+                />
+                {friendRequestsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white shadow-sm">
+                    {friendRequestsCount > 99 ? '99+' : friendRequestsCount}
+                  </span>
+                )}
+              </div>
+
+              {/* More Options Icon */}
+              <div className="relative">
+                <CiCircleMore
+                  className={`text-gray-500 size-[25px] cursor-pointer transition-colors hover:text-blue-500 ${moreOptionsOpen ? 'text-blue-500' : ''}`}
+                  onClick={toggleMoreOptions}
+                  title="More options"
+                />
+
+                {/* More Options Popup */}
+                {moreOptionsOpen && (
+                  <div className="absolute top-10 right-0 w-44 bg-white border border-[#d3d1d1] rounded-lg shadow-lg py-2 z-50">
+                    <Link
+                      to="/profile"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Profile
+                    </Link>
+                    <Link
+                      to="/profile-settings"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit Profile
+                    </Link>
+                    <Link
+                      to="/profile-settings"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Settings
+                    </Link>
+                    <Link
+                      to="/wallet"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                      </svg>
+                      Wallet
+                    </Link>
+                    <Link
+                      to="/subscriptions"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      Subscriptions
+                    </Link>
+                    <Link
+                      to="/verify-account"
+                      onClick={() => setMoreOptionsOpen(false)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Verify Account
+                    </Link>
+                    <div className="border-t border-gray-200 my-1"></div>
+                    <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                      </svg>
+                      Night Mode
+                    </button>
+                    <div className="border-t border-gray-200 my-1"></div>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* Full width notifications drawer */}
+          <Notifications
+            isOpen={notificationsOpen}
+            onClose={toggleNotifications}
+            containerRect={containerRect}
+            refreshCount={fetchNotificationCount}
+          />
+          {/* Friend Requests drawer */}
+          <FriendRequests
+            isOpen={friendRequestsOpen}
+            onClose={toggleFriendRequests}
+            containerRect={containerRect}
+            onRequestHandled={fetchFriendRequestsCount}
+          />
+        </div>
+      </div>
+
+      {/* Global Search Component */}
+      <GlobalSearch isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+
+      {/* Individual/Groups Toggle */}
+      <div className="flex flex-col p-2 mt-2 bg-white rounded-lg border border-[#d3d1d1]">
+        <div className="flex w-full items-center justify-around">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setActiveSection('individual')}
+              className={`group relative flex items-center gap-2 border xl:px-4 lg:px-2 px-2 py-1 rounded-xl cursor-pointer transition-all duration-200 ${activeSection === 'individual'
+                ? 'border-[#212121] bg-[#f0f0f0]'
+                : 'border-[#d3d1d1] bg-white hover:border-blue-500'
+                }`}
+              title="Individual messages"
+            >
+              <FaUser className={`size-[20px] xl:size-[24px] lg:size-[20px] transition-colors ${activeSection === 'individual' ? 'text-[#212121]' : 'text-[#808080] group-hover:text-blue-500'
+                }`} />
+              {activeSection === 'individual' && (
+                <span className="text-sm font-medium text-[#212121]">Individual</span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveSection('groups')}
+              className={`group relative flex items-center gap-2 border xl:px-4 lg:px-2 px-2 py-1 rounded-xl cursor-pointer transition-all duration-200 ${activeSection === 'groups'
+                ? 'border-[#212121] bg-[#f0f0f0]'
+                : 'border-[#d3d1d1] bg-white hover:border-blue-500'
+                }`}
+              title="Group chats"
+            >
+              <FaUsers className={`size-[20px] xl:size-[24px] lg:size-[20px] transition-colors ${activeSection === 'groups' ? 'text-[#212121]' : 'text-[#808080] group-hover:text-blue-500'
+                }`} />
+              {activeSection === 'groups' && (
+                <span className="text-sm font-medium text-[#212121]">Groups</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Refresh Button */}
+        {/* <div className="flex justify-end mt-2">
+          <button
+            onClick={() => {
+              if (activeSection === 'individual') {
+                getalluserchats();
+              } else {
+                getallgroupchats();
+              }
+            }}
+            className="text-sm text-blue-600 hover:text-blue-800 underline"
+          >
+            Refresh {activeSection === 'individual' ? 'Conversations' : 'Groups'}
+          </button>
+        </div> */}
+
+        <div className="flex flex-col xl:gap-4 lg:gap-2">
+          {activeSection === 'individual' ? (
+            // Individual Conversations
+            loading ? (
+              <div className="mt-4 text-center text-gray-500">
+                <div className="w-6 h-6 border-t-transparent border-b-transparent border-r-transparent border-l-transparent border-2 border-blue-500 rounded-full animate-spin mx-auto mb-2"></div>
+                <p>Loading conversations...</p>
+              </div>
+            ) : conversations && conversations.length > 0 ? (
+              conversations.map((conversation) => (
+                <div key={conversation.id} className="mt-4 w-full flex items-center xl:gap-4 lg:gap-2 cursor-pointer" onClick={() => {
+                  const userData = {
+                    name: conversation?.name,
+                    avatar: conversation?.avatar_url || conversation?.avatar,
+                    avatar_url: conversation?.avatar_url || conversation?.avatar,
+                    isOnline: conversation?.isOnline
+                  };
+                  setCurrentChat(conversation?.user_id, userData);
+
+                  // Store user data in localStorage for persistence
+                  localStorage.setItem(`chat_user_${conversation?.user_id}`, JSON.stringify(userData));
+
+                  navigate(`/chat-detailed/${conversation?.user_id}`);
+                }}>
+                  {/* Profile photo */}
+                  <div className="relative grid ">
+                    <img
+                      src={conversation?.avatar_url || conversation?.avatar || "/perimg.png"}
+                      alt={conversation?.name || "User"}
+                      className="size-8 lg:size-10 xl:size-11 rounded-full object-cover"
+                      onError={(e) => {
+                        e.target.src = "/perimg.png";
+                      }}
+                    />
+                    <div
+                      className={`absolute bottom-0 right-0 size-3 lg:size-3 xl:size-4 
+                rounded-full border-2 border-white
+                ${conversation.isOnline ? "bg-[#4CAF50]" : "bg-gray-400"}`}
+                    ></div>
+                  </div>
+
+
+                  <div className="flex flex-col gap-1">
+                    <p className="xl:text-sm lg:text-xs text-sm font-semibold text-[#212121]">{conversation.name}</p>
+                    <p className="xl:text-xs lg:text-xs text-xs text-[#212121] line-clamp-1">{conversation.message}</p>
+                  </div>
+                  <span className='text-[#212121] xl:text-sm lg:text-xs text-xs font-medium'>{conversation.time}</span>
+                </div>
+              ))
+            ) : (
+              <div className="mt-6 text-center text-gray-500">
+                <p>No individual conversations found</p>
+              </div>
+            )
+          ) : (
+            // Group Conversations
+            loading ? (
+              <div className="mt-6 text-center text-gray-500">
+                <div className="w-6 h-6 border-t-transparent border-b-transparent border-r-transparent border-l-transparent border-2 border-blue-500 rounded-full animate-spin mx-auto mb-2"></div>
+                <p>Loading groups...</p>
+              </div>
+            ) : groupConversations && groupConversations.length > 0 ? (
+              groupConversations.map((group) => (
+                <div key={group.id} className="mt-6 w-full flex items-center justify-between xl:gap-4 lg:gap-2 cursor-pointer" onClick={() => {
+                  const groupData = {
+                    name: group?.name,
+                    avatar: group?.avatar_url || group?.avatar,
+                    avatar_url: group?.avatar_url || group?.avatar,
+                    isOnline: group?.isOnline,
+                    type: 'group'
+                  };
+                  setCurrentChat(group?.group_id, groupData);
+
+                  // Store group data in localStorage for persistence
+                  localStorage.setItem(`chat_user_${group?.group_id}`, JSON.stringify(groupData));
+
+                  navigate(`/chat-detailed/${group?.group_id}`);
+                }}>
+                  {/* Group photo */}
+                  <div className="relative grid ">
+                    <img
+                      src={group?.avatar_url || group?.avatar || "/icons/group.png"}
+                      alt={group?.name || "Group"}
+                      className="size-8 lg:size-10 xl:size-11 rounded-full object-cover"
+                      onError={(e) => {
+                        e.target.src = "/icons/group.png";
+                      }}
+                    />
+                    <div className="size-3 lg:size-3 xl:size-4 rounded-full bg-[#4CAF50] absolute -right-0 -bottom-0 border-2 border-inset border-white"></div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <p className="xl:text-sm lg:text-xs text-sm font-semibold text-[#212121]">{group.name}</p>
+                    <p className="xl:text-xs lg:text-xs text-xs text-[#212121] line-clamp-1">{group.message}</p>
+                  </div>
+                  <span className='text-[#212121] xl:text-sm lg:text-xs text-xs font-medium'>{group.time}</span>
+                </div>
+              ))
+            ) : (
+              <div className="mt-6 text-center text-gray-500">
+                <p>No group conversations found</p>
+              </div>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* Trending Topics (only when enabled) */}
+      {showTrending && <TrendingTopics />}
+
+      {/* Who to Follow */}
+      <div className="py-4 px-6 mt-2.5 bg-[#a2a2a2] rounded-lg border border-[#d3d1d1]">
+        <Link to="/" className='cursor-pointer'>
+        <img src="/op_logo.png" alt="ouptel-logo" width={100} />
+        </Link>
+        <div className="grid grid-cols-2 gap-11 text-white mt-3.5 text-[12px]">
+          <div className="flex flex-col gap-1.5 ">
+            <Link to="/about-us" className="hover:underline hover:text-gray-800 transition-colors">About us</Link>
+            <Link to="/blog" className="hover:underline hover:text-gray-800 transition-colors">Blogs</Link>
+            <Link to="/contact" className="hover:underline hover:text-gray-800 transition-colors">Contact us</Link>
+            <Link to="/developers" className="hover:underline hover:text-gray-800 transition-colors">Developers</Link>
+          </div>
+          <div className="flex flex-col gap-1.5 ">
+            <a href="" className="hover:underline hover:text-gray-800 transition-colors">Languages</a>
+            <Link to="/terms-and-conditions" className="hover:underline hover:text-gray-800 transition-colors">Terms & Condition</Link>
+            <Link to="/privacy-policy" className="hover:underline hover:text-gray-800 transition-colors">Privacy Policy</Link>
+          </div>
+        </div>
+      </div>
+
+      {/* Story Create Modal */}
+      <StoryCreateModal
+        isOpen={storyModalOpen}
+        onClose={() => setStoryModalOpen(false)}
+        onStoryCreated={fetchUserStories}
+      />
+
+      {/* Story Viewer */}
+      {userStories && userStories.length > 0 && (
+        <StoryViewer
+          isOpen={storyViewerOpen}
+          onClose={() => setStoryViewerOpen(false)}
+          stories={userStories}
+          currentUser={userData}
+          isCurrentUserStories={true}
+          onStoryDeleted={fetchUserStories}
+          allUserStories={[]}
+          initialUserIndex={0}
+        />
+      )}
+
+    </div>
+  )
+}
+
+export default Chatbox

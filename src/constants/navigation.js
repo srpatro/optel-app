@@ -1,0 +1,102 @@
+// src/constants/navigation.js
+import { BiSolidOffer } from 'react-icons/bi'
+import albumsIcon from '/icons/album.png'
+import blogIcon from '/icons/blog.png'
+import exploreIcon from '/icons/compass.png'
+import eventsIcon from '/icons/event.png'
+import forumIcon from '/icons/forum.png'
+import groupsIcon from '/icons/group.png'
+import homeIcon from '/icons/home.png'
+import jobsIcon from '/icons/job.png'
+import pagesIcon from '/icons/page.png'
+import savedIcon from '/icons/save.png'
+
+export const navigationItems = [
+  {
+    id: 'home',
+    name: 'Home',
+    path: '/',
+    icon: homeIcon,
+  },
+  {
+     id: 'explore',
+     name: 'Explore',
+     path: '/explore',
+     icon: exploreIcon,
+  },
+  {
+    id: 'albums',
+    name: 'Albums',
+    path: '/my-albums',
+    icon: albumsIcon,
+  },
+  {
+    id: 'saved-posts',
+    name: 'Saved Posts',
+    path: '/saved-posts',
+    icon: savedIcon,
+  },
+  {
+    id: 'events',
+    name: 'Events',
+    path: '/events',
+    icon: eventsIcon,
+  },
+  // {
+  //   id: 'forum',
+  //   name: 'Forum',
+  //   path: '/forum',
+  //   icon: forumIcon,
+  // },
+  {
+    id: 'my-groups',
+    name: 'My Groups',
+    path: '/my-groups',
+    icon: groupsIcon,
+  },
+  {
+    id: 'my-pages',
+    name: 'My Pages',
+    path: '/pagescomp/mainpages',
+    icon: pagesIcon,
+  },
+  {
+    id: 'blog',
+    name: 'Blog',
+    path: '/blog',
+    icon: blogIcon,
+  },
+  {
+    id: 'jobs',
+    name: 'Jobs',
+    path: '/jobs',
+    icon: jobsIcon,
+  },
+  {
+    id: 'offers',
+    name: 'Offers',
+    path: '/offers',
+    icon: BiSolidOffer ,
+    color: 'bg-gray-100', // Default background color for icon
+  },
+  // {
+  //   id: 'market',
+  //   name: 'Market',
+  //   path: '/market',
+  //   icon: marketIcon,
+  //   color: 'bg-blue-100',
+  // },
+  // {
+  //   id: 'games',
+  //   name: 'Games',
+  //   path: '/games',
+  //   icon: IoGameController,
+  //   color: 'bg-green-100',
+  // },
+  // {
+  //   id: 'more',
+  //   name: 'More',
+  //   path: '/more',
+  //   icon: moreIcon,
+  // },
+]

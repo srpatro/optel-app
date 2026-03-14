@@ -1,0 +1,148 @@
+import React, { useState, useEffect } from 'react';
+import MyPages from './MyPages';
+import SuggestedPages from './SuggestedPages';
+import LikedPages from './LikedPages';
+import { MdOutlineAddPhotoAlternate } from "react-icons/md";
+import { Link } from 'react-router-dom';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+
+const MainPages = () => {
+  const [activeTab, setActiveTab] = useState('myPages');
+  const [suggestedPages, setSuggestedPages] = useState([]);
+  const [suggestedMeta, setSuggestedMeta] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const tabs = [
+    { id: 'myPages', label: 'My Pages' },
+    { id: 'suggestedPages', label: 'Suggested Page' },
+    { id: 'likedPages', label: 'Liked Page' }
+  ];
+
+  // Fetch suggested pages when the suggested tab is active
+  useEffect(() => {
+    if (activeTab === 'suggestedPages') {
+      fetchSuggestedPages(1, false);
+    }
+  }, [activeTab]);
+
+  const fetchSuggestedPages = async (page = 1, append = false) => {
+    if (page === 1) {
+      setLoading(true);
+    }
+    try {
+      const accessToken = localStorage.getItem('access_token');
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/api/v1/pages`,
+        {
+          params: {
+            type: 'suggested',
+            per_page: 12,
+            page,
+          },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      console.log('Suggested pages API response:', response.data);
+
+      // Response structure is {data: Array, meta: {...}}
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        if (append) {
+          setSuggestedPages(prev => [...prev, ...response.data.data]);
+        } else {
+          setSuggestedPages(response.data.data);
+        }
+        if (response.data.meta) {
+          setSuggestedMeta(response.data.meta);
+        }
+      } else {
+        setSuggestedPages([]);
+        setSuggestedMeta(null);
+      }
+    } catch (error) {
+      console.error('Error fetching suggested pages:', error);
+      toast.error('Failed to load suggested pages');
+      setSuggestedPages([]);
+      setSuggestedMeta(null);
+    } finally {
+      if (page === 1) {
+        setLoading(false);
+      }
+    }
+  };
+
+  console.log(suggestedPages, "mainpage suggest")
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'myPages':
+        return <MyPages />;
+      case 'suggestedPages':
+        return (
+          <SuggestedPages
+            pages={suggestedPages}
+            loading={loading}
+            onRefresh={() => fetchSuggestedPages(1, false)}
+            onLoadMore={() => {
+              if (suggestedMeta && suggestedMeta.current_page < suggestedMeta.last_page) {
+                fetchSuggestedPages(suggestedMeta.current_page + 1, true);
+              }
+            }}
+            hasMore={!!suggestedMeta && suggestedMeta.current_page < suggestedMeta.last_page}
+            total={suggestedMeta?.total || suggestedPages.length}
+          />
+        );
+      case 'likedPages':
+        return <LikedPages />;
+      default:
+        return <MyPages />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#EDF6F9] px-4 sm:px-6 lg:px-15 py-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header Section */}
+        <div className="flex justify-between items-center flex-wrap gap-4 pb-6">
+          <h1 className="text-lg sm:text-xl lg:text-2xl font-medium text-gray-600">
+            My Pages
+          </h1>
+          <Link to="/pagescomp/mainpages/createpage">
+            <button className="text-[#808080] border cursor-pointer flex items-center gap-2 border-[#808080] px-4 py-2 rounded-full text-sm sm:text-base hover:bg-gray-50 transition">
+              <MdOutlineAddPhotoAlternate className="text-lg" />
+              <span>Create Page</span>
+            </button>
+          </Link>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-2 sm:gap-4 mb-6">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 sm:px-6 sm:py-3 rounded-full font-medium transition-colors duration-200 cursor-pointer text-sm sm:text-base ${activeTab === tab.id
+                ? 'text-white shadow-md bg-gradient-to-l from-[rgba(96,161,249,1)] to-[rgba(17,83,231,1)]'
+                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300'
+                }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+
+        {/* Content Section */}
+        <div className="transition-all duration-300">
+          {renderContent()}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MainPages;

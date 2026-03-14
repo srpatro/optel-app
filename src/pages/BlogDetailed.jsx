@@ -1,0 +1,787 @@
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import Loader from '../components/loading/Loader';
+import DeleteConfirmModal from '../components/DeleteConfirmModal';
+import Avatar from '../components/Avatar';
+import { baseUrl } from '../utils/constant';
+import axios from 'axios';
+import { getCategoryName } from '../constants/blogCategories';
+import { useUser } from '../context/UserContext';
+
+const BlogDetailed = () => {
+  const { blogId } = useParams();
+  const [blog, setBlog] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [replyTextByComment, setReplyTextByComment] = useState({});
+  const accessToken = localStorage.getItem('access_token');
+  const currentUserId = localStorage.getItem('user_id');
+  const navigate = useNavigate();
+  const { userData } = useUser();
+
+  const getBlog = async () => {
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/blogs/${blogId}?increment_view=true`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      const responseData = await response.json();
+      console.log(responseData, 'data-detailed');
+      
+      if (!response.ok || responseData.api_status !== 200) {
+        // Extract error message from different possible response formats
+        const errorMessage = 
+          responseData.errors?.error_text || 
+          responseData.api_text || 
+          responseData.message || 
+          'Failed to fetch blog';
+        throw new Error(errorMessage);
+      }
+      
+      if (!responseData.data) {
+        throw new Error('Blog data not found');
+      }
+      
+      setBlog(responseData.data);
+      setLoading(false);
+    } catch (err) {
+      setError(err.message || 'An error occurred while loading the blog');
+      setLoading(false);
+    }
+  };
+
+  const getComments = async () => {
+    try {
+      setCommentsLoading(true);
+      const res = await fetch(`${baseUrl}/api/v1/blogs/${blogId}/comments`, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: accessToken ? `Bearer ${accessToken}` : undefined,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || data.api_status !== 200) {
+        throw new Error(
+          data.errors?.error_text || data.message || 'Failed to load comments'
+        );
+      }
+      setComments(data.data?.comments || []);
+    } catch (err) {
+      console.error('Error loading comments:', err);
+      toast.error(err.message || 'Failed to load comments');
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  // Format date to relative time
+  const formatTimeAgo = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
+    if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 604800)}w ago`;
+    if (diffInSeconds < 31536000) return `${Math.floor(diffInSeconds / 2592000)}mo ago`;
+    return `${Math.floor(diffInSeconds / 31536000)}y ago`;
+  };
+
+
+  // Handle share
+  const handleShare = async () => {
+    try {
+      // Construct frontend URL instead of using backend URL
+      const frontendUrl = `${window.location.origin}/blog/${blogId}`;
+      
+      if (navigator.share) {
+        await navigator.share({
+          title: blog?.title,
+          text: blog?.description,
+          url: frontendUrl
+        });
+        
+        // Increment share count
+        setBlog(prev => ({
+          ...prev,
+          shares: (prev.shares || 0) + 1
+        }));
+      } else {
+        // Fallback: Copy to clipboard
+        await navigator.clipboard.writeText(frontendUrl);
+        toast.success('Link copied to clipboard!');
+        
+        setBlog(prev => ({
+          ...prev,
+          shares: (prev.shares || 0) + 1
+        }));
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        console.error('Error sharing:', error);
+        // Still copy to clipboard as fallback
+        try {
+          const frontendUrl = `${window.location.origin}/blog/${blogId}`;
+          await navigator.clipboard.writeText(frontendUrl);
+          toast.success('Link copied to clipboard!');
+        } catch (clipboardError) {
+          toast.error('Failed to share');
+        }
+      }
+    }
+  };
+
+  const handleComment = async () => {
+    if (!accessToken) {
+      toast.info('Please log in to comment.');
+      return;
+    }
+    const text = commentText.trim();
+    if (!text) {
+      toast.error('Please write a comment first.');
+      return;
+    }
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/blogs/${blogId}/comments`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.api_status !== 200) {
+        throw new Error(
+          data.errors?.error_text || data.message || 'Failed to post comment'
+        );
+      }
+      setComments((prev) => [...prev, data.data]);
+      setCommentText('');
+      toast.success('Comment added.');
+    } catch (err) {
+      console.error('Error posting comment:', err);
+      toast.error(err.message || 'Failed to post comment');
+    }
+  };
+
+  const handleReplySubmit = async (commentId) => {
+    if (!accessToken) {
+      toast.info('Please log in to reply.');
+      return;
+    }
+    const text = (replyTextByComment[commentId] || '').trim();
+    if (!text) {
+      toast.error('Please write a reply first.');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/v1/blogs/comments/${commentId}/replies`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ text }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || data.api_status !== 200) {
+        throw new Error(
+          data.errors?.error_text || data.message || 'Failed to post reply'
+        );
+      }
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? {
+                ...c,
+                replies: [...(c.replies || []), data.data],
+                replies_count: (c.replies_count || 0) + 1,
+              }
+            : c
+        )
+      );
+      setReplyTextByComment((prev) => ({ ...prev, [commentId]: '' }));
+      toast.success('Reply added.');
+    } catch (err) {
+      console.error('Error posting reply:', err);
+      toast.error(err.message || 'Failed to post reply');
+    }
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    if (!accessToken) {
+      toast.info('Please log in.');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/v1/blogs/comments/${commentId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.message || 'Failed to delete comment');
+      }
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      toast.success('Comment deleted.');
+    } catch (err) {
+      console.error('Error deleting comment:', err);
+      toast.error(err.message || 'Failed to delete comment');
+    }
+  };
+
+  const handleDeleteReply = async (replyId, commentId) => {
+    if (!accessToken) {
+      toast.info('Please log in.');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/v1/blogs/comments/replies/${replyId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.message || 'Failed to delete reply');
+      }
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === commentId
+            ? {
+                ...c,
+                replies: (c.replies || []).filter((r) => r.id !== replyId),
+                replies_count: Math.max((c.replies_count || 1) - 1, 0),
+              }
+            : c
+        )
+      );
+      toast.success('Reply deleted.');
+    } catch (err) {
+      console.error('Error deleting reply:', err);
+      toast.error(err.message || 'Failed to delete reply');
+    }
+  };
+
+  // Handle delete blog
+  const handleDeleteBlog = async () => {
+    setDeleting(true);
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/blogs/${blogId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+      const responseData = await response.json();
+
+      if (responseData.api_status === 200) {
+        toast.success('Blog deleted successfully!');
+        setShowDeleteModal(false);
+        setTimeout(() => {
+          navigate('/blog');
+        }, 1500);
+      } else {
+        throw new Error(responseData.message || 'Failed to delete blog');
+      }
+    } catch (err) {
+      console.error('Error deleting blog:', err);
+      toast.error(err.message || 'Failed to delete blog');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Check if current user is the blog author
+  const isOwnBlog = blog?.author?.id === parseInt(currentUserId) || blog?.author?.user_id === parseInt(currentUserId);
+
+  useEffect(() => {
+    getBlog();
+    getComments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  if (loading) {
+    return <Loader />;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#EDF6F9] flex items-center justify-center px-4 py-8">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="mb-6">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                className="w-10 h-10 text-red-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Oops!</h2>
+            <p className="text-red-600 font-semibold mb-1">{error}</p>
+            <p className="text-gray-500 text-sm">
+              {error.toLowerCase().includes('not found') || error.toLowerCase().includes('article not found')
+                ? 'The blog you are looking for does not exist or has been removed.'
+                : 'Something went wrong while loading this blog.'}
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={() => window.history.back()}
+              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+            >
+              Go Back
+            </button>
+            <button
+              onClick={() => navigate('/blog')}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            >
+              Browse Blogs
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!blog) {
+    return (
+      <div className="min-h-screen bg-[#EDF6F9] flex items-center justify-center px-4 py-8">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div className="mb-6">
+            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                className="w-10 h-10 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Blog Not Found</h2>
+            <p className="text-gray-500 text-sm">
+              The blog you are looking for does not exist or has been removed.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={() => window.history.back()}
+              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+            >
+              Go Back
+            </button>
+            <button
+              onClick={() => navigate('/blog')}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            >
+              Browse Blogs
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#EDF6F9] py-4 md:py-8">
+      <div className="max-w-4xl mx-auto px-4">
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          {/* Thumbnail */}
+          {(blog?.thumbnail_url || blog?.thumbnail) && (
+            <div className="w-full h-64 md:h-96 bg-gray-100 overflow-hidden">
+              <img
+                src={blog?.thumbnail_url || blog?.thumbnail}
+                alt={blog?.title}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.target.src = 'https://admin.ouptel.in/images/placeholders/blog-image.svg';
+                }}
+              />
+            </div>
+          )}
+
+          <div className="p-6 md:p-8">
+            {/* Title */}
+            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-4 leading-tight">
+              {blog?.title}
+            </h1>
+
+            {/* Author + time */}
+            <div className="flex items-center gap-3 mb-6 pb-6 border-b border-gray-200">
+              <Avatar
+                src={blog?.author?.avatar_url || blog?.author?.avatar}
+                name={blog?.author?.name || blog?.author?.username}
+                size="md"
+                className="border-2 border-gray-200 flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-gray-900 truncate">
+                    {blog?.author?.name || blog?.author?.username}
+                  </p>
+                  {blog?.author?.verified && (
+                    <svg className="w-5 h-5 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600">
+                  {blog?.posted_at ? formatTimeAgo(blog.posted_at) : ''}
+                  {blog?.category?.id && ` • ${getCategoryName(blog.category.id)}`}
+                  {blog?.status_text && ` • ${blog.status_text}`}
+                </p>
+              </div>
+            </div>
+
+            {/* Description */}
+            {blog?.description && (
+              <p className="text-lg text-gray-700 leading-relaxed mb-6">
+                {blog.description}
+              </p>
+            )}
+
+            {/* Full content */}
+            {blog?.content && (
+              <div className="mb-8 text-gray-800 leading-relaxed prose prose-lg max-w-none">
+                <div
+                  className="text-base md:text-lg"
+                  dangerouslySetInnerHTML={{ __html: blog.content }}
+                />
+              </div>
+            )}
+
+            {/* Tags */}
+            {blog?.tags && blog.tags.length > 0 && (
+              <div className="mb-8 flex gap-2 flex-wrap">
+                {blog.tags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="px-4 py-2 bg-blue-50 text-blue-700 text-sm rounded-full font-medium border border-blue-200 hover:bg-blue-100 transition-colors"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="mt-8 pt-6 border-t border-gray-200">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                {/* Comment Button */}
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('blog-comments');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="flex items-center gap-2 px-6 py-3 rounded-full font-semibold bg-gray-50 text-gray-700 hover:bg-gray-100 border-2 border-gray-200 transition-all duration-200"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  <span>{comments.length}</span>
+                </button>
+
+                {/* Share Button */}
+                <button
+                  onClick={handleShare}
+                  className="flex items-center gap-2 px-6 py-3 rounded-full font-semibold bg-gray-50 text-gray-700 hover:bg-gray-100 border-2 border-gray-200 transition-all duration-200"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                  <span>Share</span>
+                </button>
+
+                {/* Views (Read-only) */}
+                <div className="flex items-center gap-2 text-gray-500 ml-auto">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  <span className="text-sm font-medium">{blog?.views || 0}</span>
+                </div>
+
+                {/* Delete Button - Only visible for blog author */}
+                {isOwnBlog && (
+                  <button
+                    onClick={() => setShowDeleteModal(true)}
+                    className="flex items-center gap-2 px-6 py-3 rounded-full font-semibold bg-red-50 text-red-600 hover:bg-red-100 border-2 border-red-200 transition-all duration-200 ml-auto"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>Delete</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Comments Section */}
+          <div
+            id="blog-comments"
+            className="mt-6 mb-10 bg-white rounded-2xl shadow-md border border-gray-100 p-6 md:p-8"
+          >
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Comments ({comments.length})
+            </h2>
+
+            {/* Add comment */}
+            <div className="mb-6">
+              <textarea
+                className="w-full border border-gray-300 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={3}
+                placeholder={
+                  accessToken
+                    ? 'Write a comment...'
+                    : 'Log in to write a comment.'
+                }
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                disabled={!accessToken}
+              />
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleComment}
+                  disabled={!accessToken || !commentText.trim()}
+                  className="px-5 py-2 rounded-full bg-blue-600 text-white text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+                >
+                  Post Comment
+                </button>
+              </div>
+            </div>
+
+            {/* Comments list */}
+            {commentsLoading && (
+              <div className="flex justify-center py-4">
+                <Loader />
+              </div>
+            )}
+
+            {!commentsLoading && comments.length === 0 && (
+              <p className="text-sm text-gray-500">No comments yet.</p>
+            )}
+
+            <div className="space-y-4">
+              {comments.map((comment) => {
+                const isOwner =
+                  currentUserId &&
+                  (String(comment.author?.user_id) === String(currentUserId) ||
+                    String(blog?.author?.user_id) === String(currentUserId));
+
+                return (
+                  <div
+                    key={comment.id}
+                    className="border border-gray-100 rounded-xl p-3 md:p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <Avatar
+                        src={comment.author?.avatar_url}
+                        name={comment.author?.name || comment.author?.username}
+                        size="sm"
+                        className="border border-gray-200 flex-shrink-0"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">
+                              {comment.author?.name ||
+                                comment.author?.username ||
+                                'User'}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {comment.created_at_human ||
+                                formatTimeAgo(comment.created_at)}
+                            </p>
+                          </div>
+                          {isOwner && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteComment(comment.id)}
+                              className="text-xs text-red-500 hover:text-red-600"
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                        <p className="mt-2 text-sm text-gray-800 whitespace-pre-line">
+                          {comment.text}
+                        </p>
+
+                        {/* Replies */}
+                        {comment.replies && comment.replies.length > 0 && (
+                          <div className="mt-3 space-y-3 pl-4 border-l border-gray-100">
+                            {comment.replies.map((reply) => {
+                              const isReplyOwner =
+                                currentUserId &&
+                                (String(reply.author?.user_id) ===
+                                  String(currentUserId) ||
+                                  String(blog?.author?.user_id) ===
+                                    String(currentUserId));
+
+                              return (
+                                <div
+                                  key={reply.id}
+                                  className="flex items-start gap-2"
+                                >
+                                  <Avatar
+                                    src={reply.author?.avatar_url}
+                                    name={reply.author?.name || reply.author?.username}
+                                    size="sm"
+                                    className="border border-gray-200 flex-shrink-0"
+                                  />
+                                  <div className="flex-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div>
+                                        <p className="text-xs font-semibold text-gray-900">
+                                          {reply.author?.name ||
+                                            reply.author?.username ||
+                                            'User'}
+                                        </p>
+                                        <p className="text-[11px] text-gray-500">
+                                          {reply.created_at_human ||
+                                            formatTimeAgo(reply.created_at)}
+                                        </p>
+                                      </div>
+                                      {isReplyOwner && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleDeleteReply(
+                                              reply.id,
+                                              comment.id
+                                            )
+                                          }
+                                          className="text-[11px] text-red-500 hover:text-red-600"
+                                        >
+                                          Delete
+                                        </button>
+                                      )}
+                                    </div>
+                                    <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">
+                                      {reply.text}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Reply box */}
+                        <div className="mt-3">
+                          <input
+                            type="text"
+                            className="w-full border border-gray-200 rounded-full px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                            placeholder={
+                              accessToken ? 'Write a reply...' : 'Log in to reply.'
+                            }
+                            value={replyTextByComment[comment.id] || ''}
+                            onChange={(e) =>
+                              setReplyTextByComment((prev) => ({
+                                ...prev,
+                                [comment.id]: e.target.value,
+                              }))
+                            }
+                            disabled={!accessToken}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleReplySubmit(comment.id);
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <DeleteConfirmModal
+            title="Delete Blog?"
+            message="Are you sure you want to delete this blog? This action cannot be undone."
+            onConfirm={handleDeleteBlog}
+            onCancel={() => setShowDeleteModal(false)}
+            loading={deleting}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default BlogDetailed

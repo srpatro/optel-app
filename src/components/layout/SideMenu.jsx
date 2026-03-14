@@ -1,0 +1,127 @@
+// src/components/layout/SideMenu.js
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { FaTimes } from 'react-icons/fa'
+import { navigationItems } from '../../constants/navigation'
+import { useUser } from '../../context/UserContext'
+import Tooltip from '../ui/Tooltip'
+
+const SideMenu = ({ onClose, isMobile = false }) => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { userData, loading } = useUser()
+  
+  const isActive = (path) => {
+    if (path === '/') {
+      return location.pathname === '/'
+    }
+    return location.pathname.startsWith(path)
+  }
+
+  const handleLinkClick = () => {
+    if (isMobile && onClose) {
+      onClose()
+    }
+  }
+
+
+  const handleLogout = () => {
+    // Add logout logic here
+    localStorage.removeItem('session_id')
+    localStorage.removeItem('user_id')
+    navigate('/login')
+  }
+
+
+  return (
+    <div className={`${isMobile ? 'w-full' : 'w-52 xl:w-64'} h-screen bg-[#EDF6F9] flex flex-col`}>
+      {/* Logo Section */}
+      <div className="pt-3 border-b border-[#d3d1d1] flex items-center justify-between">
+        <div className="flex items-center justify-center space-x-3 flex-1">
+          <img src="/op_logo.png" alt="Ouptel Logo" className="w-[9rem] aspect-1" />
+        </div>
+        {isMobile && (
+          <Tooltip label="Close menu">
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-gray-200 transition-colors lg:hidden"
+            >
+              <FaTimes className="w-5 h-5 text-gray-600" />
+            </button>
+          </Tooltip>
+        )}
+      </div>
+
+      {/* Navigation Items */}
+      <div className="flex-1 px-3 pt-[19px] pb-0 overflow-y-auto scrollbar-hide">
+        <nav className="">
+          {navigationItems.map((item) => {
+            const active = isActive(item.path)
+            const IconComponent = typeof item.icon === 'function' ? item.icon : null
+
+            return (
+              <Tooltip key={item.id} label={item.name}>
+                <Link
+                  to={item.path}
+                  onClick={handleLinkClick}
+                  className={`flex items-center space-x-2 py-1 px-4 rounded-lg transition-colors duration-200 ${active
+                    ? 'bg-white border border-[#d3d1d1]'
+                    : 'hover:bg-gray-100'
+                    }`}
+                >
+                <div
+                  className={`w-9 h-9 ${item.color || 'bg-gray-100'} rounded-lg flex items-center justify-center flex-shrink-0`}
+                >
+                  {IconComponent ? (
+                    <IconComponent className="w-5 h-5 text-gray-700" />
+                  ) : (
+                    <img
+                      src={item.icon}
+                      alt={item.name}
+                      className="w-5 h-5 object-contain"
+                    />
+                  )}
+                </div>
+                <span
+                  className={`font-medium text-lg truncate ${active ? 'text-blue-600' : 'text-gray-700'
+                    }`}
+                >
+                  {item.name}
+                </span>
+              </Link>
+              </Tooltip>
+            )
+          })}
+        </nav>
+      </div>
+
+      {/* User Profile Section */}
+      <div className="px-3 py-1 mt-5">
+        <Tooltip label="Profile">
+          <div className="flex items-center space-x-2 p-2 bg-white rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+            <img
+              src={userData?.avatar_url || "https://img.freepik.com/premium-vector/man-avatar-profile-picture-isolated-background-avatar-profile-picture-man_1293239-4866.jpg?semt=ais_hybrid&w=740&q=80"}
+              alt="User Profile"
+              className="w-11 h-11 rounded-full object-cover"
+            onClick={() => {
+              navigate('/profile')
+            }}
+            onError={(e) => {
+              e.target.src = "https://img.freepik.com/premium-vector/man-avatar-profile-picture-isolated-background-avatar-profile-picture-man_1293239-4866.jpg?semt=ais_hybrid&w=740&q=80";
+            }}
+          />
+          <div className="flex-1" onClick={() => {
+            navigate('/profile')
+          }}>
+            <p className="font-semibold text-base text-gray-900">
+              {loading ? 'Loading...' : `${userData?.first_name || 'User'} ${userData?.last_name || ''}`}
+            </p>
+            <p className="text-sm text-gray-500">@{loading ? 'loading...' : userData?.username || 'username'}</p>
+          </div>
+          </div>
+        </Tooltip>
+      </div>
+    </div>
+  )
+}
+
+export default SideMenu
